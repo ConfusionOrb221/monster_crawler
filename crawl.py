@@ -4,7 +4,7 @@ from pyquery import PyQuery
 from lxml import etree
 import json
 import re
-import time
+from collections import defaultdict
 
 stats_list = ["Str", "Dex", "Con", "Int", "Wis", "Cha"]
 
@@ -21,7 +21,7 @@ class Stats:
         return json.dumps(self, default=lambda o: o.__dict__, sort_keys=False, indent=4)
 
 class Monster:
-    def __init__(self, name, level, stats, traits, perception, source, languages, skills, ac, fort, ref, will, option, hp, immune, resistances, weaknesses, speed, hp_option, actions):
+    def __init__(self, name, level, stats, traits, perception, source, languages, skills, ac, fort, ref, will, option, hp, immune, resistances, weaknesses, speed, hp_option, actions, spells, spelltype, spelldc, recall_knowledge):
         self.name = name
         self.level = level
         self.stats = stats
@@ -42,6 +42,10 @@ class Monster:
         self.speed = speed
         self.hp_option = hp_option
         self.actions = actions
+        self.spells = spells
+        self.spelltype = spelltype
+        self.spelldc = spelldc
+        self.recallKnowledge = recall_knowledge
 
     def toJSON(self):
         return json.dumps(self, default=lambda o: o.__dict__, sort_keys=False, indent=4)
@@ -65,7 +69,10 @@ def getLang(main_content):
     lang_list = []
     for val in languages:
         if any("Languages" in string for string in val.values()):
-            lang_list.append(val.getchildren()[0].text)
+            try:
+                lang_list.append(val.getchildren()[0].text)
+            except:
+                ""
     return lang_list
 
 def getTraits(main_content):
@@ -79,7 +86,7 @@ def getTraits(main_content):
                 else:
                     trait_list.append(val.text)
         except:
-            print("error")
+            ""
             continue
     return trait_list
 
@@ -165,14 +172,14 @@ def getResistances(main_content, text):
             temp = resistances.show().__str__()
             options = temp.split('/b>')[1].strip() + " "
         except:
-            print("")
+            ""
         for var in items:
             if var.text == None:
                 try:
                     options += var.getchildren()[0].text.strip() + " "
                     options += var.getchildren()[0].tail.strip() + " "
                 except:
-                    print("")
+                    ""
             elif var.text == None or var.tail == None:
                 break
             elif "Weaknesses" in var.text or "Speed" in var.text:
@@ -201,8 +208,9 @@ def getActions(main_content):
     
 
 def monsters():
-    i = 5
+    i = 1600
     html = None
+    f = open("monsters.txt", "a")
     while True:
         print(i)
         try:
@@ -211,6 +219,12 @@ def monsters():
             i += 1
             continue
         pq = PyQuery(html)
+        raw = pq.html()
+        dc_pos = raw.find(': DC')
+        dc_level = None
+        if dc_pos > 0:
+            dc_level = raw[dc_pos:dc_pos + 7]
+            dc_level = int(re.findall(r'\d+', dc_level)[0])      
         main_content = pq('span#ctl00_MainContent_DetailedOutput')
         title = main_content('h1.title').eq(0).text()
         level = main_content('h1.title').eq(1).text().split()[-1]
@@ -233,11 +247,40 @@ def monsters():
         weakness = getResistances(main_content, "Weaknesses")
         speed = main_content('b').filter(lambda i, this: PyQuery(this).text() == 'Speed')
         speed = speed.__str__()[speed.__str__().index(' ') + 1:]
-        actions = getActions(main_content)
         spells = main_content('b').filter(lambda i, this: PyQuery(this).text().find('Innate Spells') > 0)
-
-        print(spells.next().next().next().next())
-        print(spells)
+        recall_knowledge = main_content('a')
+        for val123 in recall_knowledge:
+            if any("Skills" in string for string in val123.values()) and any("General" in string for string in val123.values()):
+                recall_knowledge = val123.text
+        spell_list = []
+        spell_type = None
+        if spells.size() > 0 and spells.parent().has_class("hanging-indent"):
+            while True:
+                if spells.has_class("hanging-indent") or spells.has_class("title"):
+                    break;
+                spell_list.append(spells.text().strip())
+                spells = spells.next()
+            spell_type = spell_list[0]
+            spell_list.remove(spell_list[0])
+            curr_lvl = None
+            spell_dic = []
+            for x in spell_list:
+                if not x:
+                    "do nothing"
+                elif x == "Constant":
+                    "do nothing"
+                elif x.find("Rituals") > 0:
+                    "do nothing"
+                elif len(re.findall(r'\d+', x)) > 0:
+                    curr_lvl = int(re.findall(r'\d+', x)[0])
+                else: 
+                    spell_dic.append((curr_lvl, x))
+            dic = defaultdict(list)
+            for lvl, x in spell_dic:
+                dic[lvl].append(x)
+        else:
+            dic = None
+        actions = getActions(main_content)
         options = None
         hp_option = None
         if pos > 0:
@@ -246,11 +289,12 @@ def monsters():
             hp_option = hp.__str__()[hp_pos + 1:len(hp.__str__())].strip()
         will = int(re.findall(r'\b\d+\b', will.__str__()[will.__str__().index(' ') + 1:])[0])
         hp = int(re.findall(r'\b\d+\b', hp.__str__()[hp.__str__().index(' ') + 1:])[0])
-        monster = Monster(title, int(level), stats, traits, preception, source, lang, skills, ac, fort, ref, will, options, hp, immune, resistances, weakness, speed, hp_option, actions)
+        monster = Monster(title, int(level), stats, traits, preception, source, lang, skills, ac, fort, ref, will, options, hp, immune, resistances, weakness, speed, hp_option, actions, dic, spell_type, dc_level, recall_knowledge)
+        f.write(monster.toJSON())
         print(monster.toJSON())
-        time.sleep(.1)
         i += 1
-        if i >= 1:
+        if i >= 10000:
+            f.close()
             quit()
 
 monsters()
